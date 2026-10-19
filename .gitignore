@@ -1,0 +1,19 @@
+# Compiled binaries
+cpu_rtm
+cuda_rtm
+*.o
+*.out
+
+# Generated simulation outputs
+results/cpu_*.csv
+results/cuda_*.csv
+
+# Python
+__pycache__/
+.ipynb_checkpoints/
+*.py[cod]
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
