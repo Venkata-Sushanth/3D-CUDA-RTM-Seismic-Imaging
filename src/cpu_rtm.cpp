@@ -17,6 +17,8 @@ constexpr float PI = 3.14159265358979323846f;
 constexpr std::size_t CELLS = static_cast<std::size_t>(NX) * NY * NZ;
 constexpr std::size_t SNAPSHOT_VALUES = static_cast<std::size_t>(NT) * CELLS;
 constexpr int SX = NX / 2, SY = NY / 2, SZ = 3;
+constexpr int SPONGE = 8;
+constexpr float ALPHA = 0.015f;
 
 inline std::size_t index3(int x, int y, int z) {
     return (static_cast<std::size_t>(z) * NY + y) * NX + x;
@@ -27,6 +29,25 @@ float ricker(int t) {
     const float a = PI * F0 * (time - 1.5f / F0);
     const float a2 = a * a;
     return (1.0f - 2.0f * a2) * std::exp(-a2);
+}
+
+void build_damping(std::vector<float>& damping) {
+    for (int z = 0; z < NZ; ++z) {
+        for (int y = 0; y < NY; ++y) {
+            for (int x = 0; x < NX; ++x) {
+                const int dist_x = std::min(x, NX - 1 - x);
+                const int dist_y = std::min(y, NY - 1 - y);
+                const int dist_z = std::min(z, NZ - 1 - z);
+                const int min_dist = std::min({dist_x, dist_y, dist_z});
+                float factor = 1.0f;
+                if (min_dist < SPONGE) {
+                    const float d = static_cast<float>(SPONGE - min_dist);
+                    factor = std::exp(-ALPHA * d * d);
+                }
+                damping[index3(x, y, z)] = factor;
+            }
+        }
+    }
 }
 
 void build_velocity(std::vector<float>& velocity) {
@@ -49,6 +70,7 @@ void step_wave(const std::vector<float>& previous,
                const std::vector<float>& current,
                std::vector<float>& next,
                const std::vector<float>& velocity,
+               const std::vector<float>& damping,
                float source_amplitude) {
     const float inv_dx2 = 1.0f / (DX * DX);
     for (int z = 0; z < NZ; ++z) {
@@ -64,9 +86,28 @@ void step_wave(const std::vector<float>& previous,
                                  + current[index3(x, y - 1, z)] + current[index3(x, y + 1, z)]
                                  + current[index3(x, y, z - 1)] + current[index3(x, y, z + 1)]
                                  - 6.0f * c) * inv_dx2;
-                next[i] = 2.0f * c - previous[i]
-                        + velocity[i] * velocity[i] * DT * DT * lap;
+                next[i] = (2.0f * c - previous[i]
+                        + velocity[i] * velocity[i] * DT * DT * lap) * damping[i];
                 if (x == SX && y == SY && z == SZ) next[i] += source_amplitude;
+            }
+        }
+    }
+}
+
+void apply_laplacian(const std::vector<float>& input, std::vector<float>& output) {
+    const float inv_dx2 = 1.0f / (DX * DX);
+    for (int z = 0; z < NZ; ++z) {
+        for (int y = 0; y < NY; ++y) {
+            for (int x = 0; x < NX; ++x) {
+                const std::size_t i = index3(x, y, z);
+                if (x == 0 || y == 0 || z == 0 || x == NX - 1 || y == NY - 1 || z == NZ - 1) {
+                    output[i] = 0.0f;
+                    continue;
+                }
+                output[i] = (input[index3(x - 1, y, z)] + input[index3(x + 1, y, z)]
+                           + input[index3(x, y - 1, z)] + input[index3(x, y + 1, z)]
+                           + input[index3(x, y, z - 1)] + input[index3(x, y, z + 1)]
+                           - 6.0f * input[i]) * inv_dx2;
             }
         }
     }
@@ -104,15 +145,16 @@ void write_traces_csv(const std::string& path, const std::vector<float>& traces)
 int main() {
     try {
         std::filesystem::create_directories("results");
-        std::vector<float> velocity(CELLS), previous(CELLS, 0.0f),
-                           current(CELLS, 0.0f), next(CELLS, 0.0f);
+        std::vector<float> velocity(CELLS), damping(CELLS, 1.0f);
+        std::vector<float> previous(CELLS, 0.0f), current(CELLS, 0.0f), next(CELLS, 0.0f);
         std::vector<float> snapshots(SNAPSHOT_VALUES, 0.0f);
         std::vector<float> traces(static_cast<std::size_t>(NT) * NR, 0.0f);
         build_velocity(velocity);
+        build_damping(damping);
 
         const auto start = std::chrono::steady_clock::now();
         for (int t = 0; t < NT; ++t) {
-            step_wave(previous, current, next, velocity, ricker(t));
+            step_wave(previous, current, next, velocity, damping, ricker(t));
             std::copy(next.begin(), next.end(), snapshots.begin() + static_cast<std::size_t>(t) * CELLS);
             for (int r = 0; r < NR; ++r) {
                 const int x = 4 + r;
@@ -128,7 +170,7 @@ int main() {
         std::fill(next.begin(), next.end(), 0.0f);
         std::vector<float> image(CELLS, 0.0f);
         for (int t = NT - 1; t >= 0; --t) {
-            step_wave(previous, current, next, velocity, 0.0f);
+            step_wave(previous, current, next, velocity, damping, 0.0f);
             inject_receivers(next, traces, t);
             const std::size_t offset = static_cast<std::size_t>(t) * CELLS;
             for (std::size_t i = 0; i < CELLS; ++i)
@@ -140,14 +182,18 @@ int main() {
         const double forward_ms = std::chrono::duration<double, std::milli>(forward_end - start).count();
         const double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
 
+        std::vector<float> image_lap(CELLS, 0.0f);
+        apply_laplacian(image, image_lap);
+
         write_grid_csv("results/cpu_velocity_model.csv", velocity);
         write_grid_csv("results/cpu_rtm_image.csv", image);
+        write_grid_csv("results/cpu_rtm_image_laplacian.csv", image_lap);
         write_traces_csv("results/cpu_receiver_gather.csv", traces);
         std::cout << "CPU 3D acoustic RTM prototype completed\n"
                   << "Grid: " << NX << 'x' << NY << 'x' << NZ << ", time steps: " << NT << '\n'
                   << "Forward modeling: " << forward_ms << " ms\n"
                   << "Forward + RTM imaging: " << total_ms << " ms\n"
-                  << "Wrote results/cpu_rtm_image.csv and results/cpu_receiver_gather.csv\n";
+                  << "Wrote results/cpu_rtm_image.csv, results/cpu_rtm_image_laplacian.csv, and results/cpu_receiver_gather.csv\n";
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << '\n';
         return 1;

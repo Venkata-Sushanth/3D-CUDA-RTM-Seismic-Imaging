@@ -13,9 +13,14 @@ This prototype uses synthetic data to demonstrate the workflow. It is not a prod
 - Synthetic 64 × 64 × 64 3D velocity model with layered regions, an offset layer boundary, and a small velocity anomaly.
 - Ricker-wavelet source and 56 synthetic receiver locations.
 - Forward 3D acoustic wave propagation over a series of time steps.
+- Cerjan exponential absorbing sponge boundary condition to attenuate edge reflections.
 - Synthetic receiver trace recording.
-- Reverse-time propagation and a basic forward/backward wavefield correlation image.
+- Reverse-time propagation and standard zero-lag wavefield correlation image.
+- 3D Laplacian spatial filtering to suppress low-frequency direct-wave artifacts and enhance sharp reflector interfaces.
 - CPU and CUDA implementations with timing output and CSV results.
+- Automated numerical parity verification script (`scripts/verify_results.py`).
+- Standalone publication-quality plotting dashboard (`scripts/plot_results.py`).
+- Automated end-to-end benchmark suite (`scripts/benchmark.py`).
 - Colab notebook for compiling the CUDA source and plotting the outputs.
 
 ## Repository layout
@@ -26,6 +31,10 @@ This prototype uses synthetic data to demonstrate the workflow. It is not a prod
     ├── src/
     │   ├── cpu_rtm.cpp
     │   └── cuda_rtm.cu
+    ├── scripts/
+    │   ├── benchmark.py
+    │   ├── plot_results.py
+    │   └── verify_results.py
     ├── notebooks/
     │   └── 3D_CUDA_RTM_Seismic_Imaging.ipynb
     └── results/
@@ -33,9 +42,9 @@ This prototype uses synthetic data to demonstrate the workflow. It is not a prod
 
 ## Requirements
 
-For the CPU reference, use a C++17 compiler such as g++.
-
-For the CUDA version, use an NVIDIA GPU, a compatible NVIDIA driver, and the CUDA Toolkit with nvcc. The notebook is intended for a Colab GPU runtime where the CUDA compiler is available.
+- For the CPU reference: C++17 compiler such as `g++` (`g++ -O3 -std=c++17`).
+- For the CUDA version: NVIDIA GPU, compatible NVIDIA driver, and the CUDA Toolkit with `nvcc`.
+- For analysis scripts: Python 3 with `numpy`, `pandas`, `scipy`, and `matplotlib`.
 
 ## Run the CPU reference
 
@@ -46,9 +55,10 @@ Run these commands from the repository root:
 
 The program prints forward-modeling and total runtime. It writes:
 
-- results/cpu_velocity_model.csv
-- results/cpu_receiver_gather.csv
-- results/cpu_rtm_image.csv
+- `results/cpu_velocity_model.csv`
+- `results/cpu_receiver_gather.csv`
+- `results/cpu_rtm_image.csv`
+- `results/cpu_rtm_image_laplacian.csv`
 
 ## Run the CUDA implementation
 
@@ -59,18 +69,37 @@ Run on a system with a working CUDA Toolkit and NVIDIA GPU:
 
 The program reports the detected GPU and timing information. It writes:
 
-- results/cuda_velocity_model.csv
-- results/cuda_receiver_gather.csv
-- results/cuda_rtm_image.csv
+- `results/cuda_velocity_model.csv`
+- `results/cuda_receiver_gather.csv`
+- `results/cuda_rtm_image.csv`
+- `results/cuda_rtm_image_laplacian.csv`
+
+## Verification, Plotting & Benchmarking
+
+### 1. Verify Numerical Parity (CPU vs CUDA)
+
+Compare the CPU reference and GPU outputs to ensure numerical accuracy within floating-point tolerance:
+
+    python scripts/verify_results.py
+
+### 2. Generate Result Plots & Dashboard
+
+Generate high-resolution PNG figures (`velocity_model.png`, `receiver_gather.png`, `rtm_image_raw.png`, `rtm_image_laplacian.png`, and the 4-panel `rtm_summary_dashboard.png`):
+
+    python scripts/plot_results.py
+
+### 3. Run Automated Benchmark Suite
+
+Compile, run both versions, print speedup multipliers, verify parity, and generate plots automatically:
+
+    python scripts/benchmark.py
 
 ## Run with Google Colab
 
-1. Open the notebook at notebooks/3D_CUDA_RTM_Seismic_Imaging.ipynb in Google Colab.
+1. Open the notebook at `notebooks/3D_CUDA_RTM_Seismic_Imaging.ipynb` in Google Colab.
 2. Select Runtime → Change runtime type → GPU, when available.
 3. Run cells from top to bottom.
 4. Review the printed runtime values and the generated model, receiver-gather, and RTM plots.
-
-The notebook clones this public repository and compiles the native CUDA C++ source. The GPU type and availability depend on the runtime assigned to the session.
 
 ## Benchmarking responsibly
 
@@ -82,8 +111,9 @@ The notebook clones this public repository and compiles the native CUDA C++ sour
 
 ## Limitations
 
-This implementation is a small demonstration using a second-order, 7-point finite-difference acoustic equation, synthetic receiver traces, fixed-zero outer boundaries, and a basic correlation imaging condition. More realistic RTM workflows require better absorbing boundaries, validated discretization and stability checks, realistic/prepared seismic data, improved imaging conditions, and benchmark validation. The output should not be interpreted as evidence of an actual geological reservoir or fault.
+This implementation is an educational demonstration using a second-order, 7-point finite-difference acoustic equation, synthetic receiver traces, Cerjan sponge absorbing boundaries, and a correlation imaging condition. More realistic industry RTM workflows require complex viscoelastic stencils, CPML boundaries, multi-shot acquisition, and real-world field seismic data. The output should not be interpreted as evidence of an actual geological reservoir or fault.
 
 ## License
 
 No license has been added. Add a license file before explicitly permitting reuse under particular terms.
+
